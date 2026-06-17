@@ -9,6 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
+      contents: read   # actions/checkout needs this (the permissions block is an allowlist)
       id-token: write  # OIDC trusted publishing — no API token needed
     steps:
       - uses: actions/checkout@v5
