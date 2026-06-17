@@ -127,3 +127,15 @@ def test_batch_preserves_input_order():
     fn = make_attempt_fn(succeeds_on={None})
     results = run(run_batch(fn, ["a", "b", "c"], ["A100"]))
     assert results == ["ok@base:a", "ok@base:b", "ok@base:c"]
+
+
+def test_starmap_pattern_unpacks_tuple_args():
+    # mirrors LadderMethod.starmap: the attempt unpacks each tuple input
+    async def attempt_fn(tier, args):
+        a, b = args
+        if tier is None:
+            return a + b
+        raise Boom("escalated but still fails")
+
+    results = run(run_batch(attempt_fn, [(1, 2), (3, 4)], ["A100"]))
+    assert results == [3, 7]

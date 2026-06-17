@@ -176,6 +176,12 @@ class LadderMethod:
 
         return attempt
 
+    def _starmap_attempt(self) -> AttemptFn:
+        async def attempt(tier, args):
+            return await self._bound(tier).remote.aio(*args)
+
+        return attempt
+
     @property
     def remote(self) -> _Caller:
         return _Caller(
@@ -189,9 +195,29 @@ class LadderMethod:
         )
 
     def map(self, inputs) -> list:
-        """Local batch: each input walks its own ladder, concurrently."""
+        """Local batch: each input walks its own ladder, concurrently.
+
+        Mirrors Modal's ``.map`` but each input escalates the GPU on its own
+        failure. Exhausted inputs come back as ``LadderExhausted`` in place
+        (one failure never aborts the batch).
+        """
         return _run(
             run_batch(self._map_attempt(), list(inputs), self._retries, should_escalate=self._se)
+        )
+
+    def starmap(self, inputs) -> list:
+        """Local batch over tuples of args (mirrors Modal's ``.starmap``).
+
+        Each input is a tuple unpacked into the call. Like :meth:`map`, each
+        input walks its own ladder and exhausted inputs come back in place.
+        """
+        return _run(
+            run_batch(
+                self._starmap_attempt(),
+                list(inputs),
+                self._retries,
+                should_escalate=self._se,
+            )
         )
 
     def spawn_map(self, inputs) -> LadderCall:
