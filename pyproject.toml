@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "modal-gpu-retry"
+version = "0.1.0"
+description = "Retries that escalate the GPU — a drop-in Modal wrapper where retries=[...] is a GPU ladder."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Alexander Kranias", email = "alexander.kranias@gmail.com" }]
+keywords = ["modal", "gpu", "retry", "oom", "escalation"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = ["modal"]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff", "mypy"]
+
+[project.urls]
+Homepage = "https://github.com/alexkranias/modal-gpu-retry"
+Issues = "https://github.com/alexkranias/modal-gpu-retry/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/modal_gpu_retry"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.mypy]
+# type-check target (runtime still supports 3.9; mypy itself needs >=3.10 here)
+python_version = "3.10"
+files = ["src"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
