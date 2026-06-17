@@ -7,7 +7,7 @@ name = "modal-gpu-retry"
 version = "0.1.0"
 description = "Retries that escalate the GPU — a drop-in Modal wrapper where retries=[...] is a GPU ladder."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Alexander Kranias", email = "alexander.kranias@gmail.com" }]
@@ -18,7 +18,9 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Topic :: Software Development :: Libraries",
 ]
-dependencies = ["modal"]
+# Function.with_options (used for per-tier escalation) requires modal>=1.5,
+# which itself requires Python>=3.10.
+dependencies = ["modal>=1.5"]
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff", "mypy"]
@@ -38,7 +40,6 @@ src = ["src", "tests"]
 select = ["E", "F", "I", "B", "UP"]
 
 [tool.mypy]
-# type-check target (runtime still supports 3.9; mypy itself needs >=3.10 here)
 python_version = "3.10"
 files = ["src"]
 ignore_missing_imports = true

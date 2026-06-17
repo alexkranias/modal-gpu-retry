@@ -1,3 +1,0 @@
-When we dispatch a cpu orchestrator on modal's side it may not be able to interpret the errors from the
-failed jobs when escalating. I don't think it is necessary for it to be able to understand why the job failed but simply to know to run the next job.
-All it needs to know is when a job succeeds. It just adds error repr for each gpu

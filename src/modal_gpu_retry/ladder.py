@@ -10,12 +10,12 @@ lets the whole escalation policy be tested with **zero GPU spend**.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Sequence
-from typing import Any, Callable, Optional
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Any
 
 # attempt_fn(tier, x) -> awaitable result.  tier is None for the untouched base
 # attempt (the GPU the user configured in @app.cls), or a GPU string to escalate.
-AttemptFn = Callable[[Optional[str], Any], Awaitable[Any]]
+AttemptFn = Callable[[str | None, Any], Awaitable[Any]]
 
 # should_escalate(exc, attempt_index) -> keep climbing the ladder?  Default: always.
 ShouldEscalate = Callable[[BaseException, int], bool]

@@ -23,14 +23,14 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import sys
-from collections.abc import Sequence
-from typing import Any, Callable, Optional
+from collections.abc import Callable, Sequence
+from typing import Any
 
 import modal
 
 from .ladder import AttemptFn, LadderExhausted, ShouldEscalate, ladder, run_batch
 
-BoundFn = Callable[[Optional[str]], "modal.Function"]
+BoundFn = Callable[[str | None], "modal.Function"]
 SpawnFn = Callable[[list], "LadderCall"]
 
 # Marker the CPU driver returns in place of an input that exhausted its ladder
