@@ -1,23 +1,7 @@
 # modal-gpu-retry
 
-**Retries that escalate the GPU.**
+When a Modal job fails, retry on a larger GPU.
 
-Modal's native `retries=` re-runs the *identical* spec. `modal-gpu-retry` makes a
-list-valued `retries=["A100", "B200"]` an **escalation ladder**: the base attempt
-uses whatever `gpu=` you configured, and each failure climbs to the next, bigger
-GPU until one succeeds.
-
-It is **failure-agnostic** — any exception advances the ladder, on the assumption
-that failures are sizing failures (OOM). A deterministic bug's blast radius is
-exactly `1 + len(retries)`.
-
-> Not affiliated with Modal. A community wrapper around the `modal` SDK.
-
-## Contrast with native Modal
-
-Modal's native `gpu=["H100", "A100"]` is an **availability** fallback (try the
-preferred type, fall back if it is *unavailable*). This is **escalation on
-failure** — same syntax shape, opposite trigger.
 
 ## Install
 
@@ -25,65 +9,107 @@ failure** — same syntax shape, opposite trigger.
 pip install modal-gpu-retry
 ```
 
-## Usage
+You also need it inside your Modal image, since Modal imports your module in the
+container:
 
-Swap `@app.cls` for `@mgr.cls` (or `@app.function` for `@mgr.function`) and pass a
-**list** of GPUs as `retries`. Every existing call site keeps working:
+```python
+image = modal.Image.debian_slim().pip_install("torch", "modal-gpu-retry")
+```
+
+## Motivation
+
+When running hundrends of evals on vLLM, I would often deploy these as independent Modal jobs, and frustratingly some jobs would OOM and require me to tediously figure out the exact subset of all jobs that failed and rerun them manually. I looked into what features Modal had natively, but `repeat`, which runs the job again if it fails, is ill-suited for OOM issues since it runs the job on the same hardware config.
+
+I needed fallback functionality that escalated to larger GPUs when a job failed, so I made this lightweight package: `modal-gpu-retry`. 
+
+## Usage
+All one has to do is modify the decorate
+```@app.function(gpu="L40S", image=image)```
+to
+```@mgr.function(app, gpu="L40S", retries=["A100", "H100"], image=image)```
+
+If the job fails on the L40S, it will then be run on the A100, then if it fails again, on the H100.
+
+### Example
+
+Here's an example implementation.
 
 ```python
 import modal
 import modal_gpu_retry as mgr
 
-app = modal.App("my-app")
+app = modal.App("my-evals")
 image = modal.Image.debian_slim().pip_install("torch", "modal-gpu-retry")
 
-@mgr.cls(app, gpu="T4", retries=["A100", "B200"], image=image)
-class Model:
-    @modal.method()
-    def run(self, x):
-        ...  # OOMs on T4? -> retried on A100, then B200
+# before:  @app.function(gpu="L40S", image=image)
+@mgr.function(app, gpu="L40S", retries=["A100", "H100"], image=image)
+def run_eval(config):
+    ...  # if this OOMs on L40S, it runs again on A100, then H100
 
-# local: the ladder runs in your process
-Model().run.remote(x)          # single:  T4 -> A100 -> B200
-Model().run.map(inputs)        # batch: each input walks its OWN ladder, concurrently
-
-# detached: the ladder runs server-side, survives disconnect
-handle = Model().run.spawn_map(inputs)
-results = handle.get()         # ... later, even from another process:
-# results = mgr.LadderCall.from_id(call_id).get()
+@app.local_entrypoint()
+def main():
+    results = list(run_eval.map(configs))
 ```
 
-- **List `retries`** → escalation ladder. **Int (or omitted)** → passed straight
-  through to Modal's native retries. Empty list → single base attempt.
-- On exhaustion you get a `LadderExhausted` (in `.map`/`spawn_map` results it is
-  returned in place, so one input's failure never aborts the batch).
+The first attempt uses the `gpu=` you already set. Each failure moves to the next
+GPU in the list. Run it the way you normally would, with `modal run evals.py`. It
+works on `@mgr.cls` too, and `.remote`, `.map`, and `.starmap` keep working as they
+did.
 
-### `.map` vs `.spawn_map`
+## Modal's `retries`
 
-| Call | Where the ladder runs | Survives client disconnect? |
-|------|-----------------------|------------------------------|
-| `.remote` / `.map` | your process (local) | no |
-| `.spawn_map` | a cheap CPU driver on Modal | yes — reconnect with `LadderCall.from_id` |
+Modal already has a `retries` argument, but it reruns the job with the same
+hardware configuration:
 
-## Requirements & caveats
+```python
+@app.function(gpu="L40S", retries=3)
+```
 
-- **Your image must contain `modal-gpu-retry`.** Modal re-imports your module
-  inside the container, so add it to your image: `.pip_install("modal-gpu-retry")`.
-- `spawn_map` requires the app to be **deployed** (`modal deploy ...`); it resolves
-  the target by name inside the driver container.
-- The decorated class/function appears in the Modal dashboard under a mangled name
-  (`_mgr_real_<Name>`). This is how the wrapper keeps your call sites unchanged
-  while staying compatible with Modal's container class resolution.
+This is not helpful when jobs fail due to OOM, because rerunning the
+same job on the same GPU just runs out of memory again. This package uses the same
+argument but accepts a list of GPUs, and each retry uses the next one:
 
-## How it works
+```python
+@mgr.function(app, gpu="L40S", retries=["A100", "H100"])
+```
 
-The pure escalation logic ([`ladder.py`](src/modal_gpu_retry/ladder.py)) is
-Modal-agnostic and unit-tested with a fake attempt function (zero GPU spend). The
-decorator ([`proxy.py`](src/modal_gpu_retry/proxy.py)) wraps Modal's `app.cls` /
-`app.function`, passes `retries=0` natively, and returns a proxy that routes
-`.remote` / `.map` (local) and `.spawn_map` (a server-side CPU driver) through the
-ladder.
+So:
+
+- `retries=3` behaves like normal Modal (rerun the same GPU).
+- `retries=["A100", "H100"]` reruns on a bigger GPU each time.
+- `retries=[]` just runs once.
+
+If a job fails on all GPUs specified, you get a `LadderExhausted` back in the results
+instead of an exception, so one bad job doesn't kill the batch:
+
+```python
+results = list(run_eval.map(configs))
+dead = [c for c, r in zip(configs, results, strict=True)
+        if isinstance(r, mgr.LadderExhausted)]
+```
+
+## Detached runs
+
+`.remote`, `.map`, and `.starmap` run the retry loop in your process, so they stop
+if you disconnect. `.spawn_map` runs the loop inside a small CPU function on Modal
+instead, so it keeps going after you close your laptop:
+
+```python
+handle = run_eval.spawn_map(configs)
+results = handle.get()   # later, or from a different process
+```
+
+To pick it back up elsewhere, pass the call id to `mgr.LadderCall.from_id(call_id)`.
+
+## Notes
+
+- `spawn_map` needs the app deployed (`modal deploy`), because the driver looks up
+  the target by name.
+- Your class or function shows up in the Modal dashboard with a `_mgr_real_`
+  prefix. That's how the wrapper keeps your call sites unchanged without breaking
+  the way Modal loads your class inside the container.
 
 ## License
 
-Apache-2.0.
+Apache-2.0. This is a community wrapper around the modal SDK and isn't affiliated
+with Modal.
