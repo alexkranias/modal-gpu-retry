@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "modal-gpu-retry"
-version = "0.1.0"
+version = "0.0.1"
 description = "Retries that escalate the GPU — a drop-in Modal wrapper where retries=[...] is a GPU ladder."
 readme = "README.md"
 requires-python = ">=3.10"
