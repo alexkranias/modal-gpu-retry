@@ -1,0 +1,48 @@
+"""A @mgr.cls with local (.remote/.map) and detached (.spawn_map) escalation.
+
+# local — runs in your process, streams in your terminal:
+modal run examples/cls_local_and_detached.py
+
+# detached — survives disconnect (requires a deployed app):
+modal deploy examples/cls_local_and_detached.py
+python examples/cls_local_and_detached.py spawn   # fire-and-forget, prints a call id
+python examples/cls_local_and_detached.py get <call_id>   # reconnect later
+"""
+
+import sys
+
+import modal
+
+import modal_gpu_retry as mgr
+
+app = modal.App("example-cls-escalation")
+image = modal.Image.debian_slim().pip_install("torch", "modal-gpu-retry")
+
+INPUTS = [1.0, 20.0, 1.0]  # GB to allocate; 20GB OOMs a T4, fits an A100
+
+
+@mgr.cls(app, gpu="T4", retries=["A100"], image=image)
+class Model:
+    @modal.method()
+    def run(self, gb: float) -> str:
+        import torch
+
+        name = torch.cuda.get_device_name(0)
+        torch.empty(int(gb * (1024**3) / 2), dtype=torch.float16, device="cuda")
+        torch.cuda.synchronize()
+        return f"{name} ({gb}GB)"
+
+
+@app.local_entrypoint()
+def main():
+    print("single  :", Model().run.remote(20.0))  # T4 OOM -> A100
+    print("batch   :", Model().run.map(INPUTS))  # each input its own ladder
+
+
+# Detached entry points (plain client, not a Modal entrypoint).
+if __name__ == "__main__":
+    if len(sys.argv) >= 2 and sys.argv[1] == "spawn":
+        handle = Model().run.spawn_map(INPUTS)
+        print("call id:", handle.object_id)
+    elif len(sys.argv) >= 3 and sys.argv[1] == "get":
+        print(mgr.LadderCall.from_id(sys.argv[2]).get(timeout=600))
