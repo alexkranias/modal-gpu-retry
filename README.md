@@ -18,12 +18,12 @@ image = modal.Image.debian_slim().pip_install("torch", "modal-gpu-retry")
 
 ## Motivation
 
-When running hundreds of vLLM jobs on Modal, I would often batch deploy these as independent jobs, and frustratingly some jobs would OOM and require me to tediously figure out the exact subset of all jobs that failed and rerun them manually. I looked into what features Modal had to resolve this, but their job fallback feature `repeat`, which runs the job again if it fails, is ill-suited for OOM issues since it runs the job on the same hardware config.
+When running hundreds of vLLM jobs on Modal, I would often batch deploy these as independent jobs, and frustratingly some jobs would OOM and require me to tediously figure out the exact subset of all jobs that failed and rerun them manually. I looked into what features Modal had to resolve this, but their built-in retry feature, `retries`, which runs the job again if it fails, is ill-suited for OOM issues since it runs the job on the same hardware config.
 
-I needed fallback functionality that escalated to larger GPUs when a job failed, so I made this lightweight package: `modal-gpu-retry`. 
+I needed fallback functionality that escalated to larger GPUs when a job failed, so I made this lightweight package: `modal-gpu-retry`.
 
 ## Usage
-All one has to do is modify the decorate
+All you have to do is change the decorator from
 ```@app.function(gpu="L40S", image=image)```
 to
 ```@mgr.function(app, gpu="L40S", retries=["A100", "H100"], image=image)```
@@ -77,7 +77,7 @@ So:
 
 - `retries=3` behaves like normal Modal (rerun the same GPU).
 - `retries=["A100", "H100"]` reruns on a bigger GPU each time.
-- `retries=[]` just runs once.
+- `retries=[]` is equivalent to `retries=0`.
 
 If a job fails on all GPUs specified, you get a `LadderExhausted` back in the results
 instead of an exception, so one bad job doesn't kill the batch:
