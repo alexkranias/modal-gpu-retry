@@ -1,7 +1,5 @@
 # modal-gpu-retry
 
-When a Modal job fails, retry on a larger GPU.
-
 <p align="center">
   <img src="assets/banner.png" alt="modal-gpu-retry: change @app.function to @mgr.function and add retries=[...]" width="100%">
 </p>
