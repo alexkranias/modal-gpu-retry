@@ -2,6 +2,10 @@
 
 When a Modal job fails, retry on a larger GPU.
 
+<p align="center">
+  <img src="assets/banner.png" alt="modal-gpu-retry: change @app.function to @mgr.function and add retries=[...]" width="100%">
+</p>
+
 
 ## Install
 
@@ -29,6 +33,10 @@ to
 ```@mgr.function(app, gpu="L40S", retries=["A100", "H100"], image=image)```
 
 If the job fails on the L40S, it will then be run on the A100, then if it fails again, on the H100.
+
+<p align="center">
+  <img src="assets/oom_escalation.png" alt="On OOM, each retry escalates to the next GPU: L40S to A100 to H100" width="80%">
+</p>
 
 ### Example
 
@@ -101,6 +109,26 @@ results = handle.get()   # later, or from a different process
 
 To pick it back up elsewhere, pass the call id to `mgr.LadderCall.from_id(call_id)`.
 
+## Using the Modal CLI
+
+Run your script the normal way — escalation happens inside the `local_entrypoint`
+when you call `.remote`, `.map`, or `.starmap`:
+
+```bash
+modal run evals.py
+```
+
+`modal deploy evals.py` works too, and is required before you use `.spawn_map`.
+
+### Limitations
+
+These Modal CLI patterns don't work as intended:
+
+- `modal run evals.py::run_eval` — the CLI can't target the wrapped function directly; call it from a `local_entrypoint` instead.
+- `modal run --detach evals.py` — keeps the app alive, but the retry loop for `.remote`, `.map`, and `.starmap` still stops when you disconnect; use `.spawn_map` for escalation that survives a disconnect.
+
+See [the examples README](examples/README.md#modal-cli-details) for the full explanation.
+
 ## Notes
 
 - `spawn_map` needs the app deployed (`modal deploy`), because the driver looks up
@@ -111,5 +139,5 @@ To pick it back up elsewhere, pass the call id to `mgr.LadderCall.from_id(call_i
 
 ## License
 
-Apache-2.0. This is a community wrapper around the modal SDK and isn't affiliated
+MIT. This is a community wrapper around the modal SDK and isn't affiliated
 with Modal.

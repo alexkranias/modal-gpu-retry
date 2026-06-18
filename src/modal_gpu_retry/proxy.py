@@ -5,7 +5,7 @@ pass ``retries=0`` to Modal natively, stash the GPU list as the ladder, and hand
 back a proxy over Modal's object so the *native* call sites — ``.remote``,
 ``.remote.aio``, ``.map`` (local) and ``.spawn_map`` (detached) — escalate.
 
-Object types this relies on (verified against modal 1.5.0 in the probe):
+Object types this relies on (verified against modal 1.5.0):
 - ``Model`` is ``modal.cls.Cls``; ``Model()`` is ``modal.cls.Obj``;
   ``Model().run`` and ``Model.with_options(...)().run`` are ``modal.Function``.
 - ``Function`` exposes ``remote`` (with ``.aio``), ``map``, ``spawn``,

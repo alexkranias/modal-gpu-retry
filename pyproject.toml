@@ -8,7 +8,7 @@ version = "0.0.1"
 description = "Retries that escalate the GPU — a drop-in Modal wrapper where retries=[...] is a GPU ladder."
 readme = "README.md"
 requires-python = ">=3.10"
-license = "Apache-2.0"
+license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Alexander Kranias", email = "alexander.kranias@gmail.com" }]
 keywords = ["modal", "gpu", "retry", "oom", "escalation"]

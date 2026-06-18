@@ -1,16 +1,15 @@
-"""GPU-escalation benchmark sweep.
+"""Run a batch of jobs, each retrying on a bigger GPU.
 
-The pattern: a `@mgr.function` fanned out over many configs with `.starmap` from a
-`local_entrypoint`, run with `modal run`. If a task OOMs on the base GPU it is
-retried on the next GPU in `retries=[...]` — per task, independently. A task that
-exhausts every tier comes back as a `LadderExhausted` in the results instead of
-aborting the whole sweep.
+A `@mgr.function` fanned out over many configs with `.starmap` from a
+`local_entrypoint`, run with `modal run`. If a job OOMs on the base GPU it is
+retried on the next GPU in `retries=[...]`, per job. A job that fails on every GPU
+comes back as a `LadderExhausted` in the results instead of aborting the batch.
 
-    modal run examples/gpu_escalation_sweep.py
+    modal run examples/batch_jobs.py
 
-This is the drop-in for a typical Modal benchmark script: the only change from
-native Modal is `@app.function(gpu=...)` -> `@mgr.function(app, gpu=..., retries=[...])`
-and adding `modal-gpu-retry` to the image. The `.starmap` call site is unchanged.
+The only change from native Modal is `@app.function(gpu=...)` to
+`@mgr.function(app, gpu=..., retries=[...])`, plus adding `modal-gpu-retry` to the
+image. The `.starmap` call site is unchanged.
 """
 
 import modal

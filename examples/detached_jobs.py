@@ -1,12 +1,14 @@
-"""A @mgr.cls with local (.remote/.map) and detached (.spawn_map) escalation.
+"""Run jobs that survive disconnect, using a @mgr.cls.
 
-# local — runs in your process, streams in your terminal:
-modal run examples/cls_local_and_detached.py
+Local (runs in your process, streams in your terminal):
 
-# detached — survives disconnect (requires a deployed app):
-modal deploy examples/cls_local_and_detached.py
-python examples/cls_local_and_detached.py spawn   # fire-and-forget, prints a call id
-python examples/cls_local_and_detached.py get <call_id>   # reconnect later
+    modal run examples/detached_jobs.py
+
+Detached (survives disconnect; requires a deployed app):
+
+    modal deploy examples/detached_jobs.py
+    python examples/detached_jobs.py spawn          # prints a call id, then exit
+    python examples/detached_jobs.py get <call_id>  # reconnect later, fetch results
 """
 
 import sys
