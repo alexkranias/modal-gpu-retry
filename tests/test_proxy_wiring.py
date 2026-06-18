@@ -8,7 +8,7 @@ from __future__ import annotations
 import modal
 import pytest
 
-import modal_gpu_retry as mgr
+import modal_gpu_retry as gpuretry
 from modal_gpu_retry.proxy import LadderMethod, _ClsProxy
 
 
@@ -18,7 +18,7 @@ def app():
 
 
 def test_cls_with_list_retries_returns_proxy(app):
-    @mgr.cls(app, gpu="T4", retries=["A100", "B200"], serialized=True)
+    @gpuretry.cls(app, gpu="T4", retries=["A100", "B200"], serialized=True)
     class Model:
         @modal.method()
         def run(self, x):
@@ -29,7 +29,7 @@ def test_cls_with_list_retries_returns_proxy(app):
 
 
 def test_method_access_yields_ladder_method(app):
-    @mgr.cls(app, gpu="T4", retries=["A100"], serialized=True)
+    @gpuretry.cls(app, gpu="T4", retries=["A100"], serialized=True)
     class Model:
         @modal.method()
         def run(self, x):
@@ -44,7 +44,7 @@ def test_method_access_yields_ladder_method(app):
 
 
 def test_bound_routes_base_and_tier_to_real_functions(app):
-    @mgr.cls(app, gpu="T4", retries=["A100"], serialized=True)
+    @gpuretry.cls(app, gpu="T4", retries=["A100"], serialized=True)
     class Model:
         @modal.method()
         def run(self, x):
@@ -60,7 +60,7 @@ def test_bound_routes_base_and_tier_to_real_functions(app):
 
 
 def test_int_retries_passes_through_to_native_cls(app):
-    @mgr.cls(app, gpu="T4", retries=3, serialized=True)
+    @gpuretry.cls(app, gpu="T4", retries=3, serialized=True)
     class Model:
         @modal.method()
         def run(self, x):
@@ -72,7 +72,7 @@ def test_int_retries_passes_through_to_native_cls(app):
 
 
 def test_no_retries_passes_through_to_native_cls(app):
-    @mgr.cls(app, gpu="T4", serialized=True)
+    @gpuretry.cls(app, gpu="T4", serialized=True)
     class Model:
         @modal.method()
         def run(self, x):
@@ -82,7 +82,7 @@ def test_no_retries_passes_through_to_native_cls(app):
 
 
 def test_function_with_list_retries_returns_ladder_method(app):
-    @mgr.function(app, gpu="T4", retries=["A100"], serialized=True)
+    @gpuretry.function(app, gpu="T4", retries=["A100"], serialized=True)
     def f(x):
         return x
 
@@ -92,7 +92,7 @@ def test_function_with_list_retries_returns_ladder_method(app):
 
 
 def test_function_int_retries_passes_through(app):
-    @mgr.function(app, gpu="T4", retries=2, serialized=True)
+    @gpuretry.function(app, gpu="T4", retries=2, serialized=True)
     def f(x):
         return x
 

@@ -28,7 +28,7 @@ class LadderExhausted(Exception):
 
     Self-contained and pickle-safe: it stores only the *stringified* tier labels
     and error reprs, never the raw remote exception objects (which may reference
-    modules — e.g. ``torch`` — that the driver process cannot import). The real
+    modules — e.g. ``torch`` — that the orchestrator process cannot import). The real
     last exception is still chained via ``raise ... from`` for local tracebacks;
     callers that serialize results across a process boundary strip that cause.
     """

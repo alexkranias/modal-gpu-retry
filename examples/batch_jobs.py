@@ -1,6 +1,6 @@
 """Run a batch of jobs, each retrying on a bigger GPU.
 
-A `@mgr.function` fanned out over many configs with `.starmap` from a
+A `@gpuretry.function` fanned out over many configs with `.starmap` from a
 `local_entrypoint`, run with `modal run`. If a job OOMs on the base GPU it is
 retried on the next GPU in `retries=[...]`, per job. A job that fails on every GPU
 comes back as a `LadderExhausted` in the results instead of aborting the batch.
@@ -8,13 +8,13 @@ comes back as a `LadderExhausted` in the results instead of aborting the batch.
     modal run examples/batch_jobs.py
 
 The only change from native Modal is `@app.function(gpu=...)` to
-`@mgr.function(app, gpu=..., retries=[...])`, plus adding `modal-gpu-retry` to the
+`@gpuretry.function(app, gpu=..., retries=[...])`, plus adding `modal-gpu-retry` to the
 image. The `.starmap` call site is unchanged.
 """
 
 import modal
 
-import modal_gpu_retry as mgr
+import modal_gpu_retry as gpuretry
 
 app = modal.App("example-gpu-escalation-sweep")
 
@@ -36,7 +36,7 @@ TASKS = [(mi, tag, ts) for mi, (_, tag) in enumerate(MODELS) for ts in TARGET_SI
 # Native:  @app.function(gpu="L40S", image=image, timeout=8 * 3600)
 # Elastic: add retries=[...] and switch the decorator. Base runs on L40S; on any
 # failure (e.g. CUDA OOM) the task is retried on A100, then H100.
-@mgr.function(app, gpu="L40S", retries=["A100", "H100"], image=image, timeout=8 * 3600)
+@gpuretry.function(app, gpu="L40S", retries=["A100", "H100"], image=image, timeout=8 * 3600)
 def run_task(model_idx: int, model_tag: str, target_size: float) -> str:
     import torch
 
@@ -53,7 +53,7 @@ def main():
 
     ok, exhausted = [], []
     for task, res in zip(TASKS, results, strict=True):
-        if isinstance(res, mgr.LadderExhausted):
+        if isinstance(res, gpuretry.LadderExhausted):
             exhausted.append((task, res))
         else:
             ok.append(res)
