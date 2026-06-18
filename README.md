@@ -1,7 +1,7 @@
 # modal-gpu-retry
 
 <p align="center">
-  <img src="assets/banner.png" alt="modal-gpu-retry: change @app.function to @mgr.function and add retries=[...]" width="100%">
+  <img src="assets/banner.png" alt="modal-gpu-retry: change @app.function to @gpuretry.function and add retries=[...]" width="100%">
 </p>
 
 
@@ -28,7 +28,7 @@ I needed fallback functionality that escalated to larger GPUs when a job failed,
 All you have to do is change the decorator from
 ```@app.function(gpu="L40S", image=image)```
 to
-```@mgr.function(app, gpu="L40S", retries=["A100", "H100"], image=image)```
+```@gpuretry.function(app, gpu="L40S", retries=["A100", "H100"], image=image)```
 
 If the job fails on the L40S, it will then be run on the A100, then if it fails again, on the H100.
 
@@ -42,13 +42,13 @@ Here's an example implementation.
 
 ```python
 import modal
-import modal_gpu_retry as mgr
+import modal_gpu_retry as gpuretry
 
 app = modal.App("my-evals")
 image = modal.Image.debian_slim().pip_install("torch", "modal-gpu-retry")
 
 # before:  @app.function(gpu="L40S", image=image)
-@mgr.function(app, gpu="L40S", retries=["A100", "H100"], image=image)
+@gpuretry.function(app, gpu="L40S", retries=["A100", "H100"], image=image)
 def run_eval(config):
     ...  # if this OOMs on L40S, it runs again on A100, then H100
 
@@ -59,7 +59,7 @@ def main():
 
 The first attempt uses the `gpu=` you already set. Each failure moves to the next
 GPU in the list. Run it the way you normally would, with `modal run evals.py`. It
-works on `@mgr.cls` too, and `.remote`, `.map`, and `.starmap` keep working as they
+works on `@gpuretry.cls` too, and `.remote`, `.map`, and `.starmap` keep working as they
 did.
 
 ## Modal's `retries`
@@ -76,7 +76,7 @@ same job on the same GPU just runs out of memory again. This package uses the sa
 argument but accepts a list of GPUs, and each retry uses the next one:
 
 ```python
-@mgr.function(app, gpu="L40S", retries=["A100", "H100"])
+@gpuretry.function(app, gpu="L40S", retries=["A100", "H100"])
 ```
 
 So:
@@ -91,21 +91,22 @@ instead of an exception, so one bad job doesn't kill the batch:
 ```python
 results = list(run_eval.map(configs))
 dead = [c for c, r in zip(configs, results, strict=True)
-        if isinstance(r, mgr.LadderExhausted)]
+        if isinstance(r, gpuretry.LadderExhausted)]
 ```
 
 ## Detached runs
 
 `.remote`, `.map`, and `.starmap` run the retry loop in your process, so they stop
-if you disconnect. `.spawn_map` runs the loop inside a small CPU function on Modal
-instead, so it keeps going after you close your laptop:
+if you disconnect. `.spawn_map` runs the loop inside a lightweight CPU orchestrator
+(dispatched as an independent Modal job) instead, so it keeps going after you close
+your laptop:
 
 ```python
 handle = run_eval.spawn_map(configs)
 results = handle.get()   # later, or from a different process
 ```
 
-To pick it back up elsewhere, pass the call id to `mgr.LadderCall.from_id(call_id)`.
+To pick it back up elsewhere, pass the call id to `gpuretry.LadderCall.from_id(call_id)`.
 
 ## Using the Modal CLI
 
@@ -129,8 +130,8 @@ See [the examples README](examples/README.md#modal-cli-details) for the full exp
 
 ## Notes
 
-- `spawn_map` needs the app deployed (`modal deploy`), because the driver looks up
-  the target by name.
+- `spawn_map` needs the app deployed (`modal deploy`), because the orchestrator
+  looks up the target by name.
 - Your class or function shows up in the Modal dashboard with a `_mgr_real_`
   prefix. That's how the wrapper keeps your call sites unchanged without breaking
   the way Modal loads your class inside the container.

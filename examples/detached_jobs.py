@@ -1,4 +1,4 @@
-"""Run jobs that survive disconnect, using a @mgr.cls.
+"""Run jobs that survive disconnect, using a @gpuretry.cls.
 
 Local (runs in your process, streams in your terminal):
 
@@ -15,7 +15,7 @@ import sys
 
 import modal
 
-import modal_gpu_retry as mgr
+import modal_gpu_retry as gpuretry
 
 app = modal.App("example-cls-escalation")
 image = modal.Image.debian_slim().pip_install("torch", "modal-gpu-retry")
@@ -23,7 +23,7 @@ image = modal.Image.debian_slim().pip_install("torch", "modal-gpu-retry")
 INPUTS = [1.0, 20.0, 1.0]  # GB to allocate; 20GB OOMs a T4, fits an A100
 
 
-@mgr.cls(app, gpu="T4", retries=["A100"], image=image)
+@gpuretry.cls(app, gpu="T4", retries=["A100"], image=image)
 class Model:
     @modal.method()
     def run(self, gb: float) -> str:
@@ -47,4 +47,4 @@ if __name__ == "__main__":
         handle = Model().run.spawn_map(INPUTS)
         print("call id:", handle.object_id)
     elif len(sys.argv) >= 3 and sys.argv[1] == "get":
-        print(mgr.LadderCall.from_id(sys.argv[2]).get(timeout=600))
+        print(gpuretry.LadderCall.from_id(sys.argv[2]).get(timeout=600))

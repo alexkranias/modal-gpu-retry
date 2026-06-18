@@ -1,6 +1,6 @@
 """Decorator + proxy: the drop-in surface (local + detached).
 
-``mgr.cls`` / ``mgr.function`` wrap Modal's ``app.cls`` / ``app.function``: they
+``gpuretry.cls`` / ``gpuretry.function`` wrap Modal's ``app.cls`` / ``app.function``: they
 pass ``retries=0`` to Modal natively, stash the GPU list as the ladder, and hand
 back a proxy over Modal's object so the *native* call sites — ``.remote``,
 ``.remote.aio``, ``.map`` (local) and ``.spawn_map`` (detached) — escalate.
@@ -15,7 +15,7 @@ Local vs detached: local runs the ladder in the caller's process. Detached runs
 the *same* ladder inside a cheap CPU ``@app.function`` (registered once per app),
 launched via ``.spawn`` — so escalation survives the client disconnecting, the
 same way Modal's native retries do. ``spawn_map`` requires the app to be
-deployed (it resolves the target by name inside the driver container).
+deployed (it resolves the target by name inside the orchestrator container).
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from .ladder import AttemptFn, LadderExhausted, ShouldEscalate, ladder, run_batc
 BoundFn = Callable[[str | None], "modal.Function"]
 SpawnFn = Callable[[list], "LadderCall"]
 
-# Marker the CPU driver returns in place of an input that exhausted its ladder
+# Marker the CPU orchestrator returns in place of an input that exhausted its ladder
 # (kept pickle-safe: a plain dict of strings, never a raw remote exception).
 _EXHAUSTED_KEY = "__mgr_exhausted__"
 
@@ -49,20 +49,20 @@ def _run(coro):
 
 
 # --------------------------------------------------------------------------- #
-# Detached: a generic CPU driver registered once per app.
+# Detached: a generic CPU orchestrator registered once per app.
 # --------------------------------------------------------------------------- #
-_DRIVERS: dict[int, Any] = {}
+_ORCHESTRATORS: dict[int, Any] = {}
 
 
-def _ensure_driver(app: modal.App):
+def _ensure_orchestrator(app: modal.App):
     """Register (once per app) a CPU function that runs the ladder server-side."""
     key = id(app)
-    if key in _DRIVERS:
-        return _DRIVERS[key]
+    if key in _ORCHESTRATORS:
+        return _ORCHESTRATORS[key]
 
-    @app.function(cpu=1.0, retries=0, serialized=True, name="_mgr_driver")
-    async def _mgr_driver(payload):
-        # Self-contained: only stdlib + modal, so the driver image needs no deps.
+    @app.function(cpu=1.0, retries=0, serialized=True, name="_mgr_orchestrator")
+    async def _mgr_orchestrator(payload):
+        # Self-contained: only stdlib + modal, so the orchestrator image needs no deps.
         import asyncio as _asyncio
 
         import modal as _modal
@@ -93,19 +93,19 @@ def _ensure_driver(app: modal.App):
                 except Exception as e:  # noqa: BLE001
                     label = "base" if tier is None else tier
                     attempts.append([label, f"{type(e).__name__}: {str(e)[:200]}"])
-            # literal (not the module global) so the serialized driver needs no deps
+            # literal (not the module global) so the serialized orchestrator needs no deps
             return {"__mgr_exhausted__": attempts}
 
         return await _asyncio.gather(*(one(x) for x in inputs))
 
-    _DRIVERS[key] = _mgr_driver
-    return _mgr_driver
+    _ORCHESTRATORS[key] = _mgr_orchestrator
+    return _mgr_orchestrator
 
 
 class LadderCall:
     """Handle for a detached batch — a thin wrapper over Modal's FunctionCall.
 
-    ``get()`` maps the driver's exhaustion markers back into ``LadderExhausted``
+    ``get()`` maps the orchestrator's exhaustion markers back into ``LadderExhausted``
     so detached results look identical to local ones. Reconnect from another
     process with ``LadderCall.from_id(call_id)``.
     """
@@ -224,7 +224,7 @@ class LadderMethod:
         """Detached batch: run the ladder server-side; returns a LadderCall."""
         if self._spawn is None:
             raise RuntimeError(
-                "spawn_map is only available on @mgr.cls/@mgr.function targets "
+                "spawn_map is only available on @gpuretry.cls/@gpuretry.function targets "
                 "(and requires the app to be deployed)."
             )
         return self._spawn(list(inputs))
@@ -239,7 +239,7 @@ class LadderMethod:
 # Proxies over Cls / Obj.
 # --------------------------------------------------------------------------- #
 class _ObjProxy:
-    def __init__(self, real_cls, retries, se, args, kwargs, app, cls_name, driver):
+    def __init__(self, real_cls, retries, se, args, kwargs, app, cls_name):
         self._real_cls = real_cls
         self._retries = retries
         self._se = se
@@ -247,7 +247,6 @@ class _ObjProxy:
         self._kwargs = kwargs
         self._app = app
         self._cls_name = cls_name
-        self._driver = driver
         self._obj = None
 
     def _base_obj(self):
@@ -279,20 +278,19 @@ class _ObjProxy:
                 "ctor_kwargs": self._kwargs,
                 "inputs": inputs,
             }
-            driver = modal.Function.from_name(self._app.name, "_mgr_driver")
-            return LadderCall(driver.spawn(payload))
+            orchestrator = modal.Function.from_name(self._app.name, "_mgr_orchestrator")
+            return LadderCall(orchestrator.spawn(payload))
 
         return LadderMethod(bound, self._retries, self._se, spawn=spawn)
 
 
 class _ClsProxy:
-    def __init__(self, real_cls, retries, se, app, cls_name, driver):
+    def __init__(self, real_cls, retries, se, app, cls_name):
         self._real_cls = real_cls
         self._retries = retries
         self._se = se
         self._app = app
         self._cls_name = cls_name
-        self._driver = driver
 
     def __call__(self, *args, **kwargs):
         return _ObjProxy(
@@ -303,7 +301,6 @@ class _ClsProxy:
             kwargs,
             self._app,
             self._cls_name,
-            self._driver,
         )
 
     def __getattr__(self, name: str):
@@ -349,10 +346,10 @@ def cls(app, *, retries=None, should_escalate: ShouldEscalate | None = None, **m
             return app.cls(**kw)(user_cls)
 
         mangled = _mangle(user_cls)
-        driver = _ensure_driver(app)
+        _ensure_orchestrator(app)  # register the shared CPU orchestrator for the detached path
         real = app.cls(retries=0, **modal_kwargs)(user_cls)
         setattr(sys.modules[user_cls.__module__], mangled, real)
-        return _ClsProxy(real, list(retries), should_escalate, app, mangled, driver)
+        return _ClsProxy(real, list(retries), should_escalate, app, mangled)
 
     return deco
 
@@ -368,7 +365,7 @@ def function(app, *, retries=None, should_escalate: ShouldEscalate | None = None
             return app.function(**kw)(user_fn)
 
         mangled = _mangle(user_fn)
-        _ensure_driver(app)  # register the shared CPU driver for the detached path
+        _ensure_orchestrator(app)  # register the shared CPU orchestrator for the detached path
         real = app.function(retries=0, **modal_kwargs)(user_fn)
         setattr(sys.modules[user_fn.__module__], mangled, real)
 
@@ -383,7 +380,7 @@ def function(app, *, retries=None, should_escalate: ShouldEscalate | None = None
                 "retries": list(retries),
                 "inputs": inputs,
             }
-            resolved = modal.Function.from_name(app.name, "_mgr_driver")
+            resolved = modal.Function.from_name(app.name, "_mgr_orchestrator")
             return LadderCall(resolved.spawn(payload))
 
         return LadderMethod(bound, list(retries), should_escalate, spawn=spawn)
