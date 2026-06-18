@@ -26,9 +26,13 @@ I needed fallback functionality that escalated to larger GPUs when a job failed,
 
 ## Usage
 All you have to do is change the decorator from
-```@app.function(gpu="L40S", image=image)```
+```python
+@app.function(gpu="L40S", image=image)
+```
 to
-```@gpuretry.function(app, gpu="L40S", retries=["A100", "H100"], image=image)```
+```python
+@gpuretry.function(app, gpu="L40S", retries=["A100", "H100"], image=image)
+```
 
 If the job fails on the L40S, it will then be run on the A100, then if it fails again, on the H100.
 
