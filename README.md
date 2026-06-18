@@ -1,7 +1,7 @@
 # modal-gpu-retry
 
 <p align="center">
-  <img src="assets/banner.png" alt="modal-gpu-retry: change @app.function to @gpuretry.function and add retries=[...]" width="100%">
+  <img src="https://raw.githubusercontent.com/alexkranias/modal-gpu-retry/main/assets/banner.png" alt="modal-gpu-retry: change @app.function to @gpuretry.function and add retries=[...]" width="100%">
 </p>
 
 
@@ -37,7 +37,7 @@ to
 If the job fails on the L40S, it will then be run on the A100, then if it fails again, on the H100.
 
 <p align="center">
-  <img src="assets/oom_escalation.png" alt="On OOM, each retry escalates to the next GPU: L40S to A100 to H100" width="80%">
+  <img src="https://raw.githubusercontent.com/alexkranias/modal-gpu-retry/main/assets/oom_escalation.png" alt="On OOM, each retry escalates to the next GPU: L40S to A100 to H100" width="80%">
 </p>
 
 ### Example
