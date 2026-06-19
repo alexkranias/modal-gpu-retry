@@ -1,7 +1,7 @@
 """The GPU retry escalation ladder.
 
-`ladder` runs a base attempt on the GPU specified by `gpus=`, then one attempt per GPU tier, 
-returning on the first success and raising `GPURetryExhausted` if every attempt fails. 
+`ladder` runs a base attempt on the GPU specified by `gpus=`, then one attempt per GPU tier,
+returning on the first success and raising `GPURetryExhausted` if every attempt fails.
 The Modal binding (see :mod:`modal_gpu_retry.wrapper`) supplies an ``attempt_fn`` that turns
 ``(tier, x)`` into a remote call; tests supply a fake. This separation is what
 lets the whole escalation policy be tested with **zero GPU spend**.
