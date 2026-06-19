@@ -351,7 +351,9 @@ class App(modal.App):
     tried in turn. An int (or omitted) ``retries`` passes straight through to Modal.
     """
 
-    def cls(self, *, retries=None, should_escalate: ShouldEscalate | None = None, **modal_kwargs):
+    def cls(  # type: ignore[override]  # intentionally accepts list-valued retries
+        self, *, retries=None, should_escalate: ShouldEscalate | None = None, **modal_kwargs
+    ):
         _ensure_pkg_in_image(modal_kwargs)
         if not _is_ladder(retries):
             kw = dict(modal_kwargs)
@@ -368,7 +370,7 @@ class App(modal.App):
 
         return deco
 
-    def function(
+    def function(  # type: ignore[override]  # intentionally accepts list-valued retries
         self, *, retries=None, should_escalate: ShouldEscalate | None = None, **modal_kwargs
     ):
         _ensure_pkg_in_image(modal_kwargs)

@@ -11,49 +11,47 @@
 pip install modal-gpu-retry
 ```
 
-`@app.cls`/`@app.function` on a `modal_gpu_retry.App` automatically add this package
-to whatever `image=` you pass them, since Modal re-imports your module inside the
-container — no separate `pip_install` step needed.
+## What it does
 
-## Motivation
+Modal's native `retries=` reruns a failed job on the *same* hardware, which doesn't help
+with OOM errors since the rerun will just run out of memory again. `modal-gpu-retry` reuses the same `retries`
+argument but takes a *list of GPUs* and escalates to the next one on each failure.
 
-When running hundreds of vLLM jobs on Modal, I would often batch deploy these as independent jobs, and frustratingly some jobs would OOM and require me to tediously figure out the exact subset of all jobs that failed and rerun them manually. I looked into what features Modal had to resolve this, but their built-in retry feature, `retries`, which runs the job again if it fails, is ill-suited for OOM issues since it runs the job on the same hardware config.
-
-I needed fallback functionality that escalated to larger GPUs when a job failed, so I made this lightweight package: `modal-gpu-retry`.
-
-## Usage
-Replace `modal.App` with `modal_gpu_retry.App`:
 ```python
-app = modal.App("my-evals")
-```
-becomes
-```python
-app = modal_gpu_retry.App("my-evals")
-```
-then add a list-valued `retries=[...]` to escalate GPUs on failure:
-```python
-@app.function(gpu="L40S", retries=["A100", "H100"], image=image)
+@app.function(gpu="L40S", retries=["A100", "H100"])
 ```
 
-If the job fails on the L40S, it will then be run on the A100, then if it fails again, on the H100.
+If the job OOMs on the L40S it reruns on the A100, then the H100.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/alexkranias/modal-gpu-retry/main/assets/oom_escalation.png" alt="On OOM, each retry escalates to the next GPU: L40S to A100 to H100" width="80%">
 </p>
 
-### Example
+## Usage
 
-Here's an example implementation.
+To integrate with your existing Modal scripts, there are exactly two changes needed to be made. Modify the app initialization to use `modal_gpu_retry` instead of `modal`:
+
+```python
+app = modal.App("my-evals")             # before
+app = modal_gpu_retry.App("my-evals")   # after
+```
+
+and give the decorator a list-valued `retries=[...]` containing the fallback GPUs:
+
+```python
+@app.function(gpu="L40S", image=image)                            # before
+@app.function(gpu="L40S", retries=["A100", "H100"], image=image)  # after
+```
+
+Your code should look like this now:
 
 ```python
 import modal
 import modal_gpu_retry
 
-# before:  app = modal.App("my-evals")
 app = modal_gpu_retry.App("my-evals")
 image = modal.Image.debian_slim().pip_install("torch")
 
-# before:  @app.function(gpu="L40S", image=image)
 @app.function(gpu="L40S", retries=["A100", "H100"], image=image)
 def run_eval(config):
     ...  # if this OOMs on L40S, it runs again on A100, then H100
@@ -63,36 +61,18 @@ def main():
     results = list(run_eval.map(configs))
 ```
 
-The first attempt uses the `gpu=` you already set. Each failure moves to the next
-GPU in the list. Run it the way you normally would, with `modal run evals.py`. It
-works on `@app.cls` too, and `.remote`, `.map`, and `.starmap` keep working as they
-did.
+You can run it as normal with the Modal CLI, for example `modal run evals.py` works just fine. 
 
-## Modal's `retries`
+The `retries=` value decides the behavior:
 
-Modal already has a `retries` argument, but it reruns the job with the same
-hardware configuration:
+- `retries=3`: native Modal (rerun the same GPU).
+- `retries=["A100", "H100"]`: escalate to a bigger GPU each time.
+- `retries=[]`: same as `retries=0`.
 
-```python
-@app.function(gpu="L40S", retries=3)
-```
+## Exhausted jobs come back in place
 
-This is not helpful when jobs fail due to OOM, because rerunning the
-same job on the same GPU just runs out of memory again. This package uses the same
-argument but accepts a list of GPUs, and each retry uses the next one:
-
-```python
-@app.function(gpu="L40S", retries=["A100", "H100"])
-```
-
-So:
-
-- `retries=3` behaves like normal Modal (rerun the same GPU).
-- `retries=["A100", "H100"]` reruns on a bigger GPU each time.
-- `retries=[]` is equivalent to `retries=0`.
-
-If a job fails on all GPUs specified, you get a `GPURetryExhausted` back in the results
-instead of an exception, so one bad job doesn't kill the batch:
+If a job fails on every GPU, you get a `GPURetryExhausted` in the results instead of
+an exception, so one bad job doesn't kill the batch:
 
 ```python
 results = list(run_eval.map(configs))
@@ -102,50 +82,29 @@ dead = [c for c, r in zip(configs, results, strict=True)
 
 ## Detached runs
 
-`.remote`, `.map`, and `.starmap` run the retry loop in your process, so they stop
-if you disconnect. `.spawn_map` runs the loop inside a lightweight CPU orchestrator
-(dispatched as an independent Modal job) instead, so it keeps going after you close
-your laptop:
+`.remote`, `.map`, and `.starmap` run the retry loop in your process, so it stops if
+you disconnect. `modal run --detach` doesn't help: it keeps the *app* alive but the loop
+still runs locally. For escalation that survives a disconnect, `modal deploy` your app and
+use `.spawn_map`, which runs the loop in a CPU orchestrator on Modal:
 
 ```python
 handle = run_eval.spawn_map(configs)
 results = handle.get()   # later, or from a different process
 ```
 
-To pick it back up elsewhere, pass the call id to `modal_gpu_retry.GPURetryCall.from_id(call_id)`.
-
-## Using the Modal CLI
-
-Run your script the normal way — escalation happens inside the `local_entrypoint`
-when you call `.remote`, `.map`, or `.starmap`:
-
-```bash
-modal run evals.py
-```
-
-`modal deploy evals.py` works too, and is required before you use `.spawn_map`.
-
-### Limitations
-
-These Modal CLI patterns don't work as intended:
-
-- `modal run evals.py::run_eval` — the CLI can't target the wrapped function directly; call it from a `local_entrypoint` instead.
-- `modal run --detach evals.py` — keeps the app alive, but the retry loop for `.remote`, `.map`, and `.starmap` still stops when you disconnect; use `.spawn_map` for escalation that survives a disconnect.
-
-See [the examples README](examples/README.md#modal-cli-details) for the full explanation.
+Reconnect from anywhere with `modal_gpu_retry.GPURetryCall.from_id(call_id)`.
 
 ## Notes
 
-- `spawn_map` needs the app deployed (`modal deploy`), because the orchestrator
-  looks up the target by name.
-- Your class or function shows up in the Modal dashboard with a `_mgr_real_`
-  prefix. That's how the wrapper keeps your call sites unchanged without breaking
-  the way Modal loads your class inside the container.
+- A few `modal run` CLI patterns behave unexpectedly, such as targeting the wrapped
+  function directly. See [the examples README](examples/README.md#modal-cli-details).
+- Your class/function appears in the Modal dashboard under a `_mgr_real_` prefix; that's
+  how the wrapper keeps your call sites unchanged without breaking how Modal loads your
+  class in the container.
+- It works on `@app.cls` too, and `.remote`, `.map`, and `.starmap` keep their usual call sites.
+- You don't need to modify your image because the library will install itself on the image you pass into `modal_gpu_retry.App` via `image=` automatically.
 
 ## License
 
 MIT. This is a community wrapper around the modal SDK and isn't affiliated
 with Modal.
-
-# System Design
-When a OOM exception happens exception is raised and handler returns to cpu orchestrator which then launches the next thing in the ladder

@@ -10,9 +10,11 @@ Modal re-imports your module inside the container.
 | [`detached_jobs.py`](detached_jobs.py) | A `modal_gpu_retry.App`'s `@app.cls` with `.remote` and `.map`, plus detached `.spawn_map` that survives closing your laptop. | `modal run examples/detached_jobs.py` |
 
 > Running these straight from this repo against unreleased local changes requires
-> mounting the local source instead of relying on the auto-installed PyPI release —
-> add `.add_local_python_source("modal_gpu_retry")` to the image (it overrides the
-> auto-installed copy at runtime) and run with `PYTHONPATH=src`.
+> mounting the local source instead of relying on the auto-installed PyPI release.
+> Add `.add_local_python_source("modal_gpu_retry", copy=True)` to the image (it
+> overrides the auto-installed copy at runtime) and run with `PYTHONPATH=src`. The
+> `copy=True` is required: `modal_gpu_retry.App` appends its own `pip_install` to your
+> image, and Modal forbids a build step after a non-copying `add_local_*`.
 
 ## Modal CLI details
 
