@@ -12,15 +12,14 @@ failure* — same syntax shape, opposite trigger.
 
 from __future__ import annotations
 
-from .ladder import LadderExhausted, ladder, run_batch
-from .proxy import LadderCall, LadderMethod, cls, function
+from .gpuretry import GPURetryExhausted, ladder, run_batch
+from .wrapper import App, GPURetryCall, GPURetryMethod
 
 __all__ = [
-    "cls",
-    "function",
-    "LadderCall",
-    "LadderExhausted",
-    "LadderMethod",
+    "App",
+    "GPURetryCall",
+    "GPURetryExhausted",
+    "GPURetryMethod",
     "ladder",
     "run_batch",
 ]

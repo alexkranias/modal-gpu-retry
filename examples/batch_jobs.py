@@ -1,27 +1,25 @@
 """Run a batch of jobs, each retrying on a bigger GPU.
 
-A `@gpuretry.function` fanned out over many configs with `.starmap` from a
+An `@app.function` fanned out over many configs with `.starmap` from a
 `local_entrypoint`, run with `modal run`. If a job OOMs on the base GPU it is
 retried on the next GPU in `retries=[...]`, per job. A job that fails on every GPU
-comes back as a `LadderExhausted` in the results instead of aborting the batch.
+comes back as a `GPURetryExhausted` in the results instead of aborting the batch.
 
     modal run examples/batch_jobs.py
 
-The only change from native Modal is `@app.function(gpu=...)` to
-`@gpuretry.function(app, gpu=..., retries=[...])`, plus adding `modal-gpu-retry` to the
-image. The `.starmap` call site is unchanged.
+The only changes from native Modal are `modal.App(...)` to `modal_gpu_retry.App(...)`
+and `@app.function(gpu=..., retries=[...])` — `modal_gpu_retry.App` adds itself to
+your image automatically, since Modal re-imports your module in the container.
+The `.starmap` call site is unchanged.
 """
 
 import modal
 
-import modal_gpu_retry as gpuretry
+import modal_gpu_retry
 
-app = modal.App("example-gpu-escalation-sweep")
+app = modal_gpu_retry.App("example-gpu-escalation-sweep")
 
-image = modal.Image.debian_slim(python_version="3.12").pip_install(
-    "torch",
-    "modal-gpu-retry",  # required: Modal re-imports this module in the container
-)
+image = modal.Image.debian_slim(python_version="3.12").pip_install("torch")
 
 MODELS = [
     ("Qwen/Qwen3-4B", "qwen3-4b"),
@@ -34,9 +32,9 @@ TASKS = [(mi, tag, ts) for mi, (_, tag) in enumerate(MODELS) for ts in TARGET_SI
 
 
 # Native:  @app.function(gpu="L40S", image=image, timeout=8 * 3600)
-# Elastic: add retries=[...] and switch the decorator. Base runs on L40S; on any
-# failure (e.g. CUDA OOM) the task is retried on A100, then H100.
-@gpuretry.function(app, gpu="L40S", retries=["A100", "H100"], image=image, timeout=8 * 3600)
+# Elastic: add retries=[...]. Base runs on L40S; on any failure (e.g. CUDA OOM)
+# the task is retried on A100, then H100.
+@app.function(gpu="L40S", retries=["A100", "H100"], image=image, timeout=8 * 3600)
 def run_task(model_idx: int, model_tag: str, target_size: float) -> str:
     import torch
 
@@ -53,7 +51,7 @@ def main():
 
     ok, exhausted = [], []
     for task, res in zip(TASKS, results, strict=True):
-        if isinstance(res, gpuretry.LadderExhausted):
+        if isinstance(res, modal_gpu_retry.GPURetryExhausted):
             exhausted.append((task, res))
         else:
             ok.append(res)

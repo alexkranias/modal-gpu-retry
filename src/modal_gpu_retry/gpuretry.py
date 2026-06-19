@@ -1,8 +1,8 @@
-"""The pure escalation core — knows nothing about Modal.
+"""The GPU retry escalation ladder.
 
-`ladder` runs a base attempt, then one attempt per GPU tier, returning on the
-first success and raising `LadderExhausted` if every attempt fails. The Modal
-binding (see :mod:`modal_gpu_retry.proxy`) supplies an ``attempt_fn`` that turns
+`ladder` runs a base attempt on the GPU specified by `gpus=`, then one attempt per GPU tier, 
+returning on the first success and raising `GPURetryExhausted` if every attempt fails. 
+The Modal binding (see :mod:`modal_gpu_retry.wrapper`) supplies an ``attempt_fn`` that turns
 ``(tier, x)`` into a remote call; tests supply a fake. This separation is what
 lets the whole escalation policy be tested with **zero GPU spend**.
 """
@@ -23,7 +23,7 @@ ShouldEscalate = Callable[[BaseException, int], bool]
 BASE_LABEL = "base"
 
 
-class LadderExhausted(Exception):
+class GPURetryExhausted(Exception):
     """Every tier in the ladder failed.
 
     Self-contained and pickle-safe: it stores only the *stringified* tier labels
@@ -60,7 +60,7 @@ async def ladder(
 
     Attempt 0 is the untouched base (``tier=None``); attempt ``i`` (i>=1) uses
     ``retries[i-1]`` as the GPU. Returns the first success. Raises
-    :class:`LadderExhausted` (chained from the last error) if all attempts fail,
+    :class:`GPURetryExhausted` (chained from the last error) if all attempts fail,
     or stops early if ``should_escalate`` returns False.
     """
     tiers: list[str | None] = [None, *retries]
@@ -78,7 +78,7 @@ async def ladder(
             if not is_last and should_escalate is not None and not should_escalate(exc, i):
                 break
 
-    raise LadderExhausted(attempts) from last_exc
+    raise GPURetryExhausted(attempts) from last_exc
 
 
 async def run_batch(
