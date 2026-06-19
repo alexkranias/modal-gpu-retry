@@ -1,7 +1,7 @@
 # modal-gpu-retry
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/alexkranias/modal-gpu-retry/main/assets/banner.png" alt="modal-gpu-retry: change @app.function to @gpuretry.function and add retries=[...]" width="100%">
+  <img src="https://raw.githubusercontent.com/alexkranias/modal-gpu-retry/main/assets/banner_decorator.png" alt="modal-gpu-retry: change modal.App to modal_gpu_retry.App and add retries=[...]" width="100%">
 </p>
 
 
@@ -11,12 +11,9 @@
 pip install modal-gpu-retry
 ```
 
-You also need it inside your Modal image, since Modal imports your module in the
-container:
-
-```python
-image = modal.Image.debian_slim().pip_install("torch", "modal-gpu-retry")
-```
+`@app.cls`/`@app.function` on a `modal_gpu_retry.App` automatically add this package
+to whatever `image=` you pass them, since Modal re-imports your module inside the
+container — no separate `pip_install` step needed.
 
 ## Motivation
 
@@ -25,13 +22,17 @@ When running hundreds of vLLM jobs on Modal, I would often batch deploy these as
 I needed fallback functionality that escalated to larger GPUs when a job failed, so I made this lightweight package: `modal-gpu-retry`.
 
 ## Usage
-All you have to do is change the decorator from
+Replace `modal.App` with `modal_gpu_retry.App`:
 ```python
-@app.function(gpu="L40S", image=image)
+app = modal.App("my-evals")
 ```
-to
+becomes
 ```python
-@gpuretry.function(app, gpu="L40S", retries=["A100", "H100"], image=image)
+app = modal_gpu_retry.App("my-evals")
+```
+then add a list-valued `retries=[...]` to escalate GPUs on failure:
+```python
+@app.function(gpu="L40S", retries=["A100", "H100"], image=image)
 ```
 
 If the job fails on the L40S, it will then be run on the A100, then if it fails again, on the H100.
@@ -46,13 +47,14 @@ Here's an example implementation.
 
 ```python
 import modal
-import modal_gpu_retry as gpuretry
+import modal_gpu_retry
 
-app = modal.App("my-evals")
-image = modal.Image.debian_slim().pip_install("torch", "modal-gpu-retry")
+# before:  app = modal.App("my-evals")
+app = modal_gpu_retry.App("my-evals")
+image = modal.Image.debian_slim().pip_install("torch")
 
 # before:  @app.function(gpu="L40S", image=image)
-@gpuretry.function(app, gpu="L40S", retries=["A100", "H100"], image=image)
+@app.function(gpu="L40S", retries=["A100", "H100"], image=image)
 def run_eval(config):
     ...  # if this OOMs on L40S, it runs again on A100, then H100
 
@@ -63,7 +65,7 @@ def main():
 
 The first attempt uses the `gpu=` you already set. Each failure moves to the next
 GPU in the list. Run it the way you normally would, with `modal run evals.py`. It
-works on `@gpuretry.cls` too, and `.remote`, `.map`, and `.starmap` keep working as they
+works on `@app.cls` too, and `.remote`, `.map`, and `.starmap` keep working as they
 did.
 
 ## Modal's `retries`
@@ -80,7 +82,7 @@ same job on the same GPU just runs out of memory again. This package uses the sa
 argument but accepts a list of GPUs, and each retry uses the next one:
 
 ```python
-@gpuretry.function(app, gpu="L40S", retries=["A100", "H100"])
+@app.function(gpu="L40S", retries=["A100", "H100"])
 ```
 
 So:
@@ -89,13 +91,13 @@ So:
 - `retries=["A100", "H100"]` reruns on a bigger GPU each time.
 - `retries=[]` is equivalent to `retries=0`.
 
-If a job fails on all GPUs specified, you get a `LadderExhausted` back in the results
+If a job fails on all GPUs specified, you get a `GPURetryExhausted` back in the results
 instead of an exception, so one bad job doesn't kill the batch:
 
 ```python
 results = list(run_eval.map(configs))
 dead = [c for c, r in zip(configs, results, strict=True)
-        if isinstance(r, gpuretry.LadderExhausted)]
+        if isinstance(r, modal_gpu_retry.GPURetryExhausted)]
 ```
 
 ## Detached runs
@@ -110,7 +112,7 @@ handle = run_eval.spawn_map(configs)
 results = handle.get()   # later, or from a different process
 ```
 
-To pick it back up elsewhere, pass the call id to `gpuretry.LadderCall.from_id(call_id)`.
+To pick it back up elsewhere, pass the call id to `modal_gpu_retry.GPURetryCall.from_id(call_id)`.
 
 ## Using the Modal CLI
 
@@ -144,3 +146,6 @@ See [the examples README](examples/README.md#modal-cli-details) for the full exp
 
 MIT. This is a community wrapper around the modal SDK and isn't affiliated
 with Modal.
+
+# System Design
+When a OOM exception happens exception is raised and handler returns to cpu orchestrator which then launches the next thing in the ladder

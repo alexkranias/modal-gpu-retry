@@ -1,4 +1,4 @@
-"""Unit tests for the pure ladder core — no Modal, no GPU spend.
+"""Unit tests for the GPU retry escalation ladder — no Modal, no GPU spend.
 
 A fake ``attempt_fn`` simulates a function that fails on small tiers and succeeds
 once the GPU is big enough, by recording which tiers it was asked to run on.
@@ -10,7 +10,7 @@ import asyncio
 
 import pytest
 
-from modal_gpu_retry.ladder import BASE_LABEL, LadderExhausted, ladder, run_batch
+from modal_gpu_retry.gpuretry import BASE_LABEL, GPURetryExhausted, ladder, run_batch
 
 
 class Boom(Exception):
@@ -60,7 +60,7 @@ def test_escalates_in_order_until_success():
 def test_empty_retries_is_single_attempt():
     calls = []
     fn = make_attempt_fn(succeeds_on={"A100"}, calls=calls)  # base will fail
-    with pytest.raises(LadderExhausted) as ei:
+    with pytest.raises(GPURetryExhausted) as ei:
         run(ladder(fn, "x", []))
     assert calls == [(None, "x")]
     assert len(ei.value.attempts) == 1
@@ -69,7 +69,7 @@ def test_empty_retries_is_single_attempt():
 
 def test_exhaustion_raises_with_chained_cause_and_summary():
     fn = make_attempt_fn(succeeds_on=set())  # nothing succeeds
-    with pytest.raises(LadderExhausted) as ei:
+    with pytest.raises(GPURetryExhausted) as ei:
         run(ladder(fn, "x", ["A100", "B200"]))
     exc = ei.value
     # one entry per attempt, in order, base first
@@ -82,10 +82,10 @@ def test_ladder_exhausted_is_pickle_safe():
     import pickle
 
     fn = make_attempt_fn(succeeds_on=set())
-    with pytest.raises(LadderExhausted) as ei:
+    with pytest.raises(GPURetryExhausted) as ei:
         run(ladder(fn, "x", ["A100"]))
     # the exception itself round-trips (stores only strings)
-    restored = pickle.loads(pickle.dumps(LadderExhausted(ei.value.attempts)))
+    restored = pickle.loads(pickle.dumps(GPURetryExhausted(ei.value.attempts)))
     assert restored.attempts == ei.value.attempts
 
 
@@ -99,7 +99,7 @@ def test_should_escalate_can_stop_early():
     calls = []
     fn = make_attempt_fn(succeeds_on={"B200"}, calls=calls)
     # only allow the base attempt; never escalate
-    with pytest.raises(LadderExhausted) as ei:
+    with pytest.raises(GPURetryExhausted) as ei:
         run(ladder(fn, "x", ["A100", "B200"], should_escalate=lambda exc, i: False))
     assert calls == [(None, "x")]
     assert len(ei.value.attempts) == 1
@@ -120,7 +120,7 @@ def test_batch_each_input_walks_its_own_ladder():
     results = run(run_batch(attempt_fn, ["easy", "hard", "doomed"], ["A100"]))
     assert results[0] == "easy-ok@base"
     assert results[1] == "hard-ok@A100"
-    assert isinstance(results[2], LadderExhausted)  # returned in place, not raised
+    assert isinstance(results[2], GPURetryExhausted)  # returned in place, not raised
 
 
 def test_batch_preserves_input_order():
@@ -130,7 +130,7 @@ def test_batch_preserves_input_order():
 
 
 def test_starmap_pattern_unpacks_tuple_args():
-    # mirrors LadderMethod.starmap: the attempt unpacks each tuple input
+    # mirrors GPURetryMethod.starmap: the attempt unpacks each tuple input
     async def attempt_fn(tier, args):
         a, b = args
         if tier is None:

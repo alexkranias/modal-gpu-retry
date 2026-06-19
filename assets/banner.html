@@ -1,0 +1,109 @@
+<!doctype html>
+<!--
+  Source for assets/banner.png. Regenerate with:
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+      --headless=new --hide-scrollbars --force-device-scale-factor=2 \
+      --window-size=1200,640 --screenshot=assets/banner.png \
+      "file://$PWD/assets/banner.html"
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root {
+        --ink: #0f172a;        /* default code text   */
+        --muted: #6b7280;      /* subtitle            */
+        --punct: #9ca3af;      /* parens, =, commas   */
+        --kw: #7c3aed;         /* kwarg names         */
+        --str: #0f766e;        /* string literals     */
+        --label: #9ca3af;      /* BEFORE / AFTER      */
+        --accent: #be1558;     /* the change          */
+        --accent-bg: #fdeef4;  /* highlight behind it */
+      }
+      * { box-sizing: border-box; }
+      html, body { width: 1200px; height: 640px; margin: 0; }
+      body {
+        background: #ffffff;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        font-family: "SF Mono", "Menlo", "Monaco", monospace;
+        -webkit-font-smoothing: antialiased;
+      }
+      .title {
+        font-size: 66px;
+        font-weight: 800;
+        letter-spacing: -1px;
+        color: #111111;
+      }
+      .subtitle {
+        margin-top: 14px;
+        font-size: 26px;
+        font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
+        color: var(--muted);
+      }
+      .diff {
+        margin-top: 72px;
+        display: grid;
+        grid-template-columns: auto auto;
+        column-gap: 26px;
+        row-gap: 10px;
+        align-items: baseline;
+        font-size: 23px;
+        line-height: 1.5;
+      }
+      .label {
+        justify-self: end;
+        font-size: 20px;
+        font-weight: 700;
+        letter-spacing: 2px;
+        color: var(--label);
+        padding-top: 3px;
+      }
+      .code { white-space: pre; color: var(--ink); }
+      .stack { display: flex; flex-direction: column; row-gap: 6px; }
+
+      .p  { color: var(--punct); }   /* punctuation */
+      .kw { color: var(--kw); }      /* kwarg name  */
+      .s  { color: var(--str); font-weight: 600; }  /* string */
+      .dim { color: var(--punct); }  /* @app, dots  */
+
+      .new {
+        color: var(--accent);
+        font-weight: 700;
+        background: var(--accent-bg);
+        border-radius: 5px;
+        padding: 1px 5px;
+        margin: 0 -1px;
+      }
+      .arrow {
+        grid-column: 2;
+        color: var(--accent);
+        font-size: 42px;
+        font-weight: 800;
+        padding: 8px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="title">modal-gpu-retry</div>
+    <div class="subtitle">When a Modal job fails, retry on a larger GPU.</div>
+
+    <div class="diff">
+      <div class="label">BEFORE</div>
+      <div class="stack">
+        <div class="code">app <span class="p">=</span> modal<span class="dim">.</span>App<span class="p">(</span><span class="s">"my-evals"</span><span class="p">)</span></div>
+        <div class="code"><span class="dim">@app.</span>function<span class="p">(</span><span class="kw">gpu</span><span class="p">=</span><span class="s">"L40S"</span><span class="p">,</span> <span class="kw">image</span><span class="p">=</span>image<span class="p">)</span></div>
+      </div>
+
+      <div class="arrow">&darr;</div>
+
+      <div class="label">AFTER</div>
+      <div class="stack">
+        <div class="code">app <span class="p">=</span> <span class="new">modal_gpu_retry</span><span class="dim">.</span>App<span class="p">(</span><span class="s">"my-evals"</span><span class="p">)</span></div>
+        <div class="code"><span class="dim">@app.</span>function<span class="p">(</span><span class="kw">gpu</span><span class="p">=</span><span class="s">"L40S"</span><span class="p">,</span> <span class="new"><span class="kw">retries</span>=[<span class="s">"A100"</span>, <span class="s">"H100"</span>]</span><span class="p">,</span> <span class="kw">image</span><span class="p">=</span>image<span class="p">)</span></div>
+      </div>
+    </div>
+  </body>
+</html>

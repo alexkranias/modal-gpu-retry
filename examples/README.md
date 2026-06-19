@@ -1,18 +1,18 @@
 # Examples
 
-Each example is a self-contained Modal app. Add `modal-gpu-retry` to your image
-(`.pip_install("modal-gpu-retry")`) — Modal re-imports your module inside the
-container, so the package must be present there.
+Each example is a self-contained Modal app. `@app.cls`/`@app.function` on a
+`modal_gpu_retry.App` add `modal-gpu-retry` to your image automatically, since
+Modal re-imports your module inside the container.
 
 | File | Shows | Run with |
 |------|-------|----------|
-| [`batch_jobs.py`](batch_jobs.py) | A `@gpuretry.function` fanned out with `.starmap`, each job retrying on a bigger GPU on OOM. The everyday `modal run` + `local_entrypoint` flow. | `modal run examples/batch_jobs.py` |
-| [`detached_jobs.py`](detached_jobs.py) | A `@gpuretry.cls` with `.remote` and `.map`, plus detached `.spawn_map` that survives closing your laptop. | `modal run examples/detached_jobs.py` |
+| [`batch_jobs.py`](batch_jobs.py) | A `modal_gpu_retry.App`'s `@app.function` fanned out with `.starmap`, each job retrying on a bigger GPU on OOM. The everyday `modal run` + `local_entrypoint` flow. | `modal run examples/batch_jobs.py` |
+| [`detached_jobs.py`](detached_jobs.py) | A `modal_gpu_retry.App`'s `@app.cls` with `.remote` and `.map`, plus detached `.spawn_map` that survives closing your laptop. | `modal run examples/detached_jobs.py` |
 
-> Running these straight from this repo before the package is published requires
-> mounting the local source instead of `pip_install` — swap
-> `.pip_install("modal-gpu-retry")` for
-> `.add_local_python_source("modal_gpu_retry")` and run with `PYTHONPATH=src`.
+> Running these straight from this repo against unreleased local changes requires
+> mounting the local source instead of relying on the auto-installed PyPI release —
+> add `.add_local_python_source("modal_gpu_retry")` to the image (it overrides the
+> auto-installed copy at runtime) and run with `PYTHONPATH=src`.
 
 ## Modal CLI details
 

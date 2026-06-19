@@ -1,8 +1,8 @@
-"""Decorator + proxy: the drop-in surface (local + detached).
+"""Decorator + wrapper: the drop-in surface (local + detached).
 
-``gpuretry.cls`` / ``gpuretry.function`` wrap Modal's ``app.cls`` / ``app.function``: they
-pass ``retries=0`` to Modal natively, stash the GPU list as the ladder, and hand
-back a proxy over Modal's object so the *native* call sites — ``.remote``,
+``modal_gpu_retry.App`` subclasses ``modal.App``: its ``.cls``/``.function`` pass
+``retries=0`` to Modal natively, stash the GPU list as the ladder, and hand
+back a wrapper over Modal's object so the *native* call sites — ``.remote``,
 ``.remote.aio``, ``.map`` (local) and ``.spawn_map`` (detached) — escalate.
 
 Object types this relies on (verified against modal 1.5.0):
@@ -28,10 +28,10 @@ from typing import Any
 
 import modal
 
-from .ladder import AttemptFn, LadderExhausted, ShouldEscalate, ladder, run_batch
+from .gpuretry import AttemptFn, GPURetryExhausted, ShouldEscalate, ladder, run_batch
 
 BoundFn = Callable[[str | None], "modal.Function"]
-SpawnFn = Callable[[list], "LadderCall"]
+SpawnFn = Callable[[list], "GPURetryCall"]
 
 # Marker the CPU orchestrator returns in place of an input that exhausted its ladder
 # (kept pickle-safe: a plain dict of strings, never a raw remote exception).
@@ -102,12 +102,12 @@ def _ensure_orchestrator(app: modal.App):
     return _mgr_orchestrator
 
 
-class LadderCall:
+class GPURetryCall:
     """Handle for a detached batch — a thin wrapper over Modal's FunctionCall.
 
-    ``get()`` maps the orchestrator's exhaustion markers back into ``LadderExhausted``
+    ``get()`` maps the orchestrator's exhaustion markers back into ``GPURetryExhausted``
     so detached results look identical to local ones. Reconnect from another
-    process with ``LadderCall.from_id(call_id)``.
+    process with ``GPURetryCall.from_id(call_id)``.
     """
 
     def __init__(self, function_call):
@@ -118,7 +118,7 @@ class LadderCall:
         return self._fc.object_id
 
     @classmethod
-    def from_id(cls, call_id: str) -> LadderCall:
+    def from_id(cls, call_id: str) -> GPURetryCall:
         return cls(modal.FunctionCall.from_id(call_id))
 
     def get(self, timeout: int | None = None) -> list:
@@ -128,7 +128,7 @@ class LadderCall:
 
 def _demarker(r):
     if isinstance(r, dict) and _EXHAUSTED_KEY in r:
-        return LadderExhausted([tuple(a) for a in r[_EXHAUSTED_KEY]])
+        return GPURetryExhausted([tuple(a) for a in r[_EXHAUSTED_KEY]])
     return r
 
 
@@ -149,7 +149,7 @@ class _Caller:
         return self._aio(*args, **kwargs)
 
 
-class LadderMethod:
+class GPURetryMethod:
     """The escalating call surface for one method/function."""
 
     def __init__(
@@ -198,7 +198,7 @@ class LadderMethod:
         """Local batch: each input walks its own ladder, concurrently.
 
         Mirrors Modal's ``.map`` but each input escalates the GPU on its own
-        failure. Exhausted inputs come back as ``LadderExhausted`` in place
+        failure. Exhausted inputs come back as ``GPURetryExhausted`` in place
         (one failure never aborts the batch).
         """
         return _run(
@@ -220,11 +220,11 @@ class LadderMethod:
             )
         )
 
-    def spawn_map(self, inputs) -> LadderCall:
-        """Detached batch: run the ladder server-side; returns a LadderCall."""
+    def spawn_map(self, inputs) -> GPURetryCall:
+        """Detached batch: run the ladder server-side; returns a GPURetryCall."""
         if self._spawn is None:
             raise RuntimeError(
-                "spawn_map is only available on @gpuretry.cls/@gpuretry.function targets "
+                "spawn_map is only available on @app.cls/@app.function targets "
                 "(and requires the app to be deployed)."
             )
         return self._spawn(list(inputs))
@@ -236,9 +236,9 @@ class LadderMethod:
 
 
 # --------------------------------------------------------------------------- #
-# Proxies over Cls / Obj.
+# Wrappers over Cls / Obj.
 # --------------------------------------------------------------------------- #
-class _ObjProxy:
+class _ObjWrapper:
     def __init__(self, real_cls, retries, se, args, kwargs, app, cls_name):
         self._real_cls = real_cls
         self._retries = retries
@@ -279,12 +279,12 @@ class _ObjProxy:
                 "inputs": inputs,
             }
             orchestrator = modal.Function.from_name(self._app.name, "_mgr_orchestrator")
-            return LadderCall(orchestrator.spawn(payload))
+            return GPURetryCall(orchestrator.spawn(payload))
 
-        return LadderMethod(bound, self._retries, self._se, spawn=spawn)
+        return GPURetryMethod(bound, self._retries, self._se, spawn=spawn)
 
 
-class _ClsProxy:
+class _ClsWrapper:
     def __init__(self, real_cls, retries, se, app, cls_name):
         self._real_cls = real_cls
         self._retries = retries
@@ -293,7 +293,7 @@ class _ClsProxy:
         self._cls_name = cls_name
 
     def __call__(self, *args, **kwargs):
-        return _ObjProxy(
+        return _ObjWrapper(
             self._real_cls,
             self._retries,
             self._se,
@@ -310,10 +310,22 @@ class _ClsProxy:
 
 
 # --------------------------------------------------------------------------- #
-# Public decorators.
+# Public App subclass.
 # --------------------------------------------------------------------------- #
 def _is_ladder(retries) -> bool:
     return isinstance(retries, (list, tuple))
+
+
+def _ensure_pkg_in_image(modal_kwargs: dict) -> None:
+    """Add this package to the user's image so Modal can re-import it in the container.
+
+    Unconstrained ``pip_install`` is a pip no-op if any version is already present
+    (pip only upgrades with ``--upgrade``), so this can't clobber a version the
+    user already pinned themselves.
+    """
+    image = modal_kwargs.get("image")
+    if image is not None:
+        modal_kwargs["image"] = image.pip_install("modal-gpu-retry")
 
 
 def _mangle(obj) -> str:
@@ -322,7 +334,7 @@ def _mangle(obj) -> str:
     Modal's container resolves a class/function with ``getattr(module, name)``
     where ``name`` comes from ``__name__``/``__qualname__``. By mangling that, the
     real (registered) object lives under ``_mgr_real_<name>`` while the original
-    user-facing symbol is free to hold our escalating proxy.
+    user-facing symbol is free to hold our escalating wrapper.
     """
     mangled = f"_mgr_real_{obj.__name__}"
     obj.__name__ = mangled
@@ -330,59 +342,62 @@ def _mangle(obj) -> str:
     return mangled
 
 
-def cls(app, *, retries=None, should_escalate: ShouldEscalate | None = None, **modal_kwargs):
-    """Drop-in replacement for ``@app.cls`` with GPU-escalating retries.
+class App(modal.App):
+    """Drop-in replacement for ``modal.App`` with GPU-escalating retries.
 
-    ``retries=["A100", "B200"]`` (a list) escalates the GPU on each failure: the
-    base attempt uses the configured ``gpu=``, then each entry is tried in turn.
-    An int (or omitted) ``retries`` passes straight through to Modal.
+    Construct it exactly like ``modal.App``. ``@app.cls(...)`` / ``@app.function(...)``
+    accept a list-valued ``retries=["A100", "B200"]`` to escalate the GPU on each
+    failure: the base attempt uses the configured ``gpu=``, then each entry is
+    tried in turn. An int (or omitted) ``retries`` passes straight through to Modal.
     """
 
-    def deco(user_cls):
+    def cls(self, *, retries=None, should_escalate: ShouldEscalate | None = None, **modal_kwargs):
+        _ensure_pkg_in_image(modal_kwargs)
         if not _is_ladder(retries):
             kw = dict(modal_kwargs)
             if retries is not None:
                 kw["retries"] = retries
-            return app.cls(**kw)(user_cls)
+            return modal.App.cls(self, **kw)
 
-        mangled = _mangle(user_cls)
-        _ensure_orchestrator(app)  # register the shared CPU orchestrator for the detached path
-        real = app.cls(retries=0, **modal_kwargs)(user_cls)
-        setattr(sys.modules[user_cls.__module__], mangled, real)
-        return _ClsProxy(real, list(retries), should_escalate, app, mangled)
+        def deco(user_cls):
+            mangled = _mangle(user_cls)
+            _ensure_orchestrator(self)  # register the shared CPU orchestrator for the detached path
+            real = modal.App.cls(self, retries=0, **modal_kwargs)(user_cls)
+            setattr(sys.modules[user_cls.__module__], mangled, real)
+            return _ClsWrapper(real, list(retries), should_escalate, self, mangled)
 
-    return deco
+        return deco
 
-
-def function(app, *, retries=None, should_escalate: ShouldEscalate | None = None, **modal_kwargs):
-    """Drop-in replacement for ``@app.function`` with GPU-escalating retries."""
-
-    def deco(user_fn):
+    def function(
+        self, *, retries=None, should_escalate: ShouldEscalate | None = None, **modal_kwargs
+    ):
+        _ensure_pkg_in_image(modal_kwargs)
         if not _is_ladder(retries):
             kw = dict(modal_kwargs)
             if retries is not None:
                 kw["retries"] = retries
-            return app.function(**kw)(user_fn)
+            return modal.App.function(self, **kw)
 
-        mangled = _mangle(user_fn)
-        _ensure_orchestrator(app)  # register the shared CPU orchestrator for the detached path
-        real = app.function(retries=0, **modal_kwargs)(user_fn)
-        setattr(sys.modules[user_fn.__module__], mangled, real)
+        def deco(user_fn):
+            mangled = _mangle(user_fn)
+            _ensure_orchestrator(self)  # register the shared CPU orchestrator for the detached path
+            real = modal.App.function(self, retries=0, **modal_kwargs)(user_fn)
+            setattr(sys.modules[user_fn.__module__], mangled, real)
 
-        def bound(tier):
-            return real if tier is None else real.with_options(gpu=tier, retries=0)
+            def bound(tier):
+                return real if tier is None else real.with_options(gpu=tier, retries=0)
 
-        def spawn(inputs):
-            payload = {
-                "kind": "function",
-                "app_name": app.name,
-                "name": mangled,
-                "retries": list(retries),
-                "inputs": inputs,
-            }
-            resolved = modal.Function.from_name(app.name, "_mgr_orchestrator")
-            return LadderCall(resolved.spawn(payload))
+            def spawn(inputs):
+                payload = {
+                    "kind": "function",
+                    "app_name": self.name,
+                    "name": mangled,
+                    "retries": list(retries),
+                    "inputs": inputs,
+                }
+                resolved = modal.Function.from_name(self.name, "_mgr_orchestrator")
+                return GPURetryCall(resolved.spawn(payload))
 
-        return LadderMethod(bound, list(retries), should_escalate, spawn=spawn)
+            return GPURetryMethod(bound, list(retries), should_escalate, spawn=spawn)
 
-    return deco
+        return deco
